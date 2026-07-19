@@ -22,7 +22,14 @@ STATUS_LABELS = {
     "no_data": "⚠️ Erro de dados / Ticker inválido",
 }
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify the developer."""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text("❌ Ocorreu um erro interno no bot. Tenta novamente mais tarde.")
+
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Comando /start recebido de {update.effective_chat.id}")
     state = load_state()
     state["chat_id"] = update.effective_chat.id
     save_state(state)
@@ -45,11 +52,12 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Comando /ping recebido de {update.effective_chat.id}")
     now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     await update.message.reply_text(f"🏓 *Pong!*\nBot online e a monitorizar.\n🕒 {now}", parse_mode=constants.ParseMode.MARKDOWN)
 
 async def test_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Simula o envio de um sinal de entrada e um sinal de alvo atingido para teste."""
+    logger.info(f"Comando /test recebido de {update.effective_chat.id}")
     test_ticker = "TEST"
     test_entry = 100.00
     test_target = 101.50
@@ -78,6 +86,7 @@ async def test_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(target_msg, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Comando /history recebido de {update.effective_chat.id}")
     state = load_state()
     history = state.get("history", [])
     if not history:
@@ -91,16 +100,15 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Comando /add recebido de {update.effective_chat.id} com args {context.args}")
     if not context.args:
         await update.message.reply_text("💡 Exemplo: `/add SPY`", parse_mode=constants.ParseMode.MARKDOWN)
         return
 
     state = load_state()
-    # Atualizar chat_id sempre que um comando é usado para garantir que sabemos para onde enviar sinais
     state["chat_id"] = update.effective_chat.id
     
     added = []
-    # Aceitar múltiplos tickers separados por espaço ou vírgula
     raw_args = " ".join(context.args).replace(",", " ").split()
     
     for raw in raw_args:
@@ -112,12 +120,13 @@ async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if added:
         save_state(state)
         await update.message.reply_text(f"✅ Adicionado com sucesso: {', '.join(added)}\nO bot começará a monitorizar em breve.")
-        # Trigger imediato de verificação para os novos tickers
-        context.job_queue.run_once(check_all_tickers, when=1)
+        # Trigger imediato de verificação
+        context.job_queue.run_once(check_all_tickers_job, when=1)
     else:
         await update.message.reply_text("ℹ️ Esses tickers já estão na lista ou o formato é inválido.")
 
 async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Comando /remove recebido de {update.effective_chat.id}")
     if not context.args:
         await update.message.reply_text("💡 Exemplo: `/remove SPY`", parse_mode=constants.ParseMode.MARKDOWN)
         return
@@ -141,6 +150,7 @@ async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ℹ️ Ticker não encontrado na lista.")
 
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Comando /list recebido de {update.effective_chat.id}")
     state = load_state()
     if not state["tickers"]:
         await update.message.reply_text("📭 A lista de monitorização está vazia. Usa /add.")
@@ -166,6 +176,10 @@ async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start_cmd(update, context)
+
+async def check_all_tickers_job(context: ContextTypes.DEFAULT_TYPE):
+    """Job wrapper para a função de verificação."""
+    await check_all_tickers(context)
 
 async def check_all_tickers(context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
@@ -200,8 +214,11 @@ def main():
         logger.error(str(e))
         return
 
+    # Criar a aplicação com tratamento de erros global
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    application.add_error_handler(error_handler)
 
+    # Handlers de comandos
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("help", help_cmd))
     application.add_handler(CommandHandler("ping", ping_cmd))
@@ -211,14 +228,15 @@ def main():
     application.add_handler(CommandHandler("remove", remove_cmd))
     application.add_handler(CommandHandler("list", list_cmd))
 
+    # Job Queue para verificações periódicas
     application.job_queue.run_repeating(
-        check_all_tickers, 
+        check_all_tickers_job, 
         interval=CHECK_INTERVAL_SECONDS, 
         first=10,
-        name="check_tickers_job"
+        name="check_tickers_periodic"
     )
 
-    logger.info(f"Bot iniciado. Intervalo de verificação: {CHECK_INTERVAL_SECONDS}s")
+    logger.info(f"Bot iniciado com sucesso. Verificação a cada {CHECK_INTERVAL_SECONDS}s")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
