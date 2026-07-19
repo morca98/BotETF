@@ -3,7 +3,7 @@ from datetime import datetime
 from telegram import Update, constants
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-from config import TELEGRAM_BOT_TOKEN, CHECK_INTERVAL_SECONDS
+from config import TELEGRAM_BOT_TOKEN, CHECK_INTERVAL_SECONDS, validate_config
 from state import load_state, save_state
 from strategy import check_ticker
 
@@ -96,9 +96,14 @@ async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     state = load_state()
+    # Atualizar chat_id sempre que um comando é usado para garantir que sabemos para onde enviar sinais
     state["chat_id"] = update.effective_chat.id
+    
     added = []
-    for raw in context.args:
+    # Aceitar múltiplos tickers separados por espaço ou vírgula
+    raw_args = " ".join(context.args).replace(",", " ").split()
+    
+    for raw in raw_args:
         ticker = raw.upper().strip().replace("$", "")
         if ticker and ticker not in state["tickers"]:
             state["tickers"][ticker] = {"status": "waiting_setup"}
@@ -106,9 +111,11 @@ async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if added:
         save_state(state)
-        await update.message.reply_text(f"✅ Adicionado com sucesso: {', '.join(added)}")
+        await update.message.reply_text(f"✅ Adicionado com sucesso: {', '.join(added)}\nO bot começará a monitorizar em breve.")
+        # Trigger imediato de verificação para os novos tickers
+        context.job_queue.run_once(check_all_tickers, when=1)
     else:
-        await update.message.reply_text("ℹ️ Esses tickers já estão na lista ou são inválidos.")
+        await update.message.reply_text("ℹ️ Esses tickers já estão na lista ou o formato é inválido.")
 
 async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -116,8 +123,12 @@ async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     state = load_state()
+    state["chat_id"] = update.effective_chat.id
+    
     removed = []
-    for raw in context.args:
+    raw_args = " ".join(context.args).replace(",", " ").split()
+    
+    for raw in raw_args:
         ticker = raw.upper().strip().replace("$", "")
         if ticker in state["tickers"]:
             del state["tickers"][ticker]
@@ -183,8 +194,10 @@ async def check_all_tickers(context: ContextTypes.DEFAULT_TYPE):
         save_state(state)
 
 def main():
-    if not TELEGRAM_BOT_TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN não configurado!")
+    try:
+        validate_config()
+    except RuntimeError as e:
+        logger.error(str(e))
         return
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()

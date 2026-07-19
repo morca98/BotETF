@@ -1,0 +1,9 @@
+{
+  "chat_id": 123456,
+  "tickers": {
+    "AAPL": {
+      "status": "waiting_setup"
+    }
+  },
+  "history": []
+}
