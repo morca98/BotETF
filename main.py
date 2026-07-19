@@ -23,16 +23,9 @@ STATUS_LABELS = {
 }
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log the error and send a telegram message to notify the developer."""
-    logger.error(f"Erro detetado: {context.error}", exc_info=context.error)
-    if isinstance(update, Update) and update.effective_message:
-        # Se for um erro de rede ou timeout, não assustar o utilizador
-        if "Query is too old" in str(context.error):
-            return
-        await update.effective_message.reply_text("❌ Ocorreu um erro interno no bot. Tenta novamente.")
+    logger.error(f"Erro no Update: {update} - Erro: {context.error}")
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Comando /start de {update.effective_chat.id}")
     state = load_state()
     state["chat_id"] = update.effective_chat.id
     save_state(state)
@@ -56,7 +49,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    await update.message.reply_text(f"🏓 *Pong!*\nBot online e a monitorizar.\n🕒 {now}", parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text(f"🏓 *Pong!*\nBot online.\n🕒 {now}", parse_mode=constants.ParseMode.MARKDOWN)
 
 async def test_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     test_ticker = "TEST"
@@ -81,66 +74,61 @@ async def test_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Trade concluído com sucesso! ✅"
     )
     
-    await update.message.reply_text("Iniciando teste de visualização de sinais...", parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text("Iniciando teste...", parse_mode=constants.ParseMode.MARKDOWN)
     await update.message.reply_text(entry_msg, parse_mode=constants.ParseMode.MARKDOWN)
-    await update.message.reply_text("--- Simulação de Alvo Atingido (abaixo) ---", parse_mode=constants.ParseMode.MARKDOWN)
     await update.message.reply_text(target_msg, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
     history = state.get("history", [])
     if not history:
-        await update.message.reply_text("📜 O histórico de sinais ainda está vazio.")
+        await update.message.reply_text("📜 Histórico vazio.")
         return
 
-    message = "📜 *Últimos Sinais Enviados:*\n\n"
+    message = "📜 *Últimos Sinais:*\n\n"
     for entry in reversed(history[-10:]):
         message += f"{entry}\n"
 
     await update.message.reply_text(message, parse_mode=constants.ParseMode.MARKDOWN)
 
 async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Comando /add de {update.effective_chat.id} com {context.args}")
+    """Versão simplificada ao máximo para evitar erros."""
     if not context.args:
-        await update.message.reply_text("💡 Exemplo: `/add SPY`", parse_mode=constants.ParseMode.MARKDOWN)
+        await update.message.reply_text("💡 Usa: `/add TICKER`", parse_mode=constants.ParseMode.MARKDOWN)
         return
 
-    state = load_state()
-    state["chat_id"] = update.effective_chat.id
-    
-    added = []
-    raw_args = " ".join(context.args).replace(",", " ").split()
-    
-    for raw in raw_args:
-        ticker = raw.upper().strip().replace("$", "")
-        if ticker and ticker not in state["tickers"]:
-            state["tickers"][ticker] = {"status": "waiting_setup"}
-            added.append(ticker)
-    
-    if added:
-        save_state(state)
-        await update.message.reply_text(f"✅ Adicionado com sucesso: {', '.join(added)}\nA verificar dados agora...")
-        # Corrigido: Chamar a verificação sem causar erro de contexto
-        try:
-            context.job_queue.run_once(check_all_tickers_job, when=1)
-        except Exception as e:
-            logger.error(f"Erro ao agendar verificação: {e}")
-    else:
-        await update.message.reply_text("ℹ️ Esses tickers já estão na lista ou o formato é inválido.")
+    try:
+        state = load_state()
+        state["chat_id"] = update.effective_chat.id
+        
+        added = []
+        for arg in context.args:
+            ticker = arg.upper().strip().replace("$", "").replace(",", "")
+            if ticker and ticker not in state["tickers"]:
+                state["tickers"][ticker] = {"status": "waiting_setup"}
+                added.append(ticker)
+        
+        if added:
+            save_state(state)
+            await update.message.reply_text(f"✅ Adicionado: {', '.join(added)}")
+        else:
+            await update.message.reply_text("ℹ️ Ticker já existe ou inválido.")
+            
+    except Exception as e:
+        logger.error(f"Erro no add_cmd: {e}")
+        await update.message.reply_text(f"❌ Erro ao guardar ticker: {str(e)}")
 
 async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("💡 Exemplo: `/remove SPY`", parse_mode=constants.ParseMode.MARKDOWN)
+        await update.message.reply_text("💡 Usa: `/remove TICKER`", parse_mode=constants.ParseMode.MARKDOWN)
         return
 
     state = load_state()
     state["chat_id"] = update.effective_chat.id
     
     removed = []
-    raw_args = " ".join(context.args).replace(",", " ").split()
-    
-    for raw in raw_args:
-        ticker = raw.upper().strip().replace("$", "")
+    for arg in context.args:
+        ticker = arg.upper().strip().replace("$", "").replace(",", "")
         if ticker in state["tickers"]:
             del state["tickers"][ticker]
             removed.append(ticker)
@@ -149,43 +137,23 @@ async def remove_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_state(state)
         await update.message.reply_text(f"🗑️ Removido: {', '.join(removed)}")
     else:
-        await update.message.reply_text("ℹ️ Ticker não encontrado na lista.")
+        await update.message.reply_text("ℹ️ Não encontrado.")
 
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
     if not state["tickers"]:
-        await update.message.reply_text("📭 A lista de monitorização está vazia. Usa /add.")
+        await update.message.reply_text("📭 Lista vazia.")
         return
 
-    message = "📊 *Estado Atual da Carteira:*\n\n"
+    message = "📊 *Monitorização:*\n\n"
     for ticker, info in state["tickers"].items():
         status = info.get("status", "waiting_setup")
         label = STATUS_LABELS.get(status, status)
-        
-        message += f"*{ticker}*\n"
-        message += f"└ Status: {label}\n"
-        
-        if status in ("waiting_entry", "active", "no_setup_today"):
-            entry = info.get("entry_price", 0)
-            target = info.get("target_price", 0)
-            diff = info.get("pct_diff", 0)
-            message += f"└ In: {entry:.2f} | Out: {target:.2f} | Diff: {diff:.2f}%\n"
-        
-        message += "\n"
+        message += f"*{ticker}*: {label}\n"
 
     await update.message.reply_text(message, parse_mode=constants.ParseMode.MARKDOWN)
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start_cmd(update, context)
-
 async def check_all_tickers_job(context: ContextTypes.DEFAULT_TYPE):
-    """Job wrapper para a função de verificação."""
-    try:
-        await check_all_tickers(context)
-    except Exception as e:
-        logger.error(f"Erro no job de verificação: {e}")
-
-async def check_all_tickers(context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
     chat_id = state.get("chat_id")
     if not chat_id or not state["tickers"]:
@@ -195,7 +163,7 @@ async def check_all_tickers(context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=constants.ParseMode.MARKDOWN)
         except Exception as e:
-            logger.error(f"Erro ao enviar mensagem para {chat_id}: {e}")
+            logger.error(f"Erro ao enviar: {e}")
 
     changed = False
     for ticker in list(state["tickers"].keys()):
@@ -206,7 +174,7 @@ async def check_all_tickers(context: ContextTypes.DEFAULT_TYPE):
                 state["tickers"][ticker] = new_info
                 changed = True
         except Exception as e:
-            logger.error(f"Erro ao processar {ticker}: {e}")
+            logger.error(f"Erro em {ticker}: {e}")
 
     if changed:
         save_state(state)
@@ -222,7 +190,7 @@ def main():
     application.add_error_handler(error_handler)
 
     application.add_handler(CommandHandler("start", start_cmd))
-    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("help", start_cmd))
     application.add_handler(CommandHandler("ping", ping_cmd))
     application.add_handler(CommandHandler("test", test_cmd))
     application.add_handler(CommandHandler("history", history_cmd))
@@ -230,18 +198,14 @@ def main():
     application.add_handler(CommandHandler("remove", remove_cmd))
     application.add_handler(CommandHandler("list", list_cmd))
 
-    # Verificar se a job queue está disponível antes de iniciar
     if application.job_queue:
         application.job_queue.run_repeating(
             check_all_tickers_job, 
             interval=CHECK_INTERVAL_SECONDS, 
-            first=10,
-            name="check_tickers_periodic"
+            first=10
         )
-    else:
-        logger.warning("JobQueue não disponível. Verificações automáticas desativadas.")
 
-    logger.info(f"Bot iniciado com sucesso. Verificação a cada {CHECK_INTERVAL_SECONDS}s")
+    logger.info("Bot ativo.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
