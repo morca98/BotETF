@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from telegram import Update, constants
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -31,19 +32,38 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Vou monitorizar os preços e enviar sinais baseados na estratégia:\n"
         "• *Entrada:* Mínima do dia anterior\n"
         "• *Alvo:* Máxima dos últimos 2 dias\n"
-        "• *Filtro:* Mínimo 1% de diferença\n"
-        "• *Stop:* Não utiliza stop loss\n\n"
+        "• *Filtro:* Mínimo 1% de diferença\n\n"
         "*Comandos:*\n"
         "➕ /add TICKER — Adicionar ticker\n"
         "❌ /remove TICKER — Remover ticker\n"
         "📋 /list — Ver estado atual\n"
+        "📜 /history — Ver últimos sinais\n"
+        "🏓 /ping — Verificar se o bot está online\n"
         "❓ /help — Mostrar esta ajuda"
     )
     await update.message.reply_text(welcome_text, parse_mode=constants.ParseMode.MARKDOWN)
 
+async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    await update.message.reply_text(f"🏓 *Pong!*\nBot online e a monitorizar.\n🕒 {now}", parse_mode=constants.ParseMode.MARKDOWN)
+
+async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state = load_state()
+    history = state.get("history", [])
+    if not history:
+        await update.message.reply_text("📜 O histórico de sinais ainda está vazio.")
+        return
+
+    message = "📜 *Últimos Sinais Enviados:*\n\n"
+    # Mostrar os últimos 10 sinais (mais recentes primeiro)
+    for entry in reversed(history[-10:]):
+        message += f"{entry}\n"
+
+    await update.message.reply_text(message, parse_mode=constants.ParseMode.MARKDOWN)
+
 async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("💡 Exemplo: `/add SPY` ou `/add QQQ AAPL`", parse_mode=constants.ParseMode.MARKDOWN)
+        await update.message.reply_text("💡 Exemplo: `/add SPY`", parse_mode=constants.ParseMode.MARKDOWN)
         return
 
     state = load_state()
@@ -120,11 +140,11 @@ async def check_all_tickers(context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Erro ao enviar mensagem para {chat_id}: {e}")
 
     changed = False
-    # Usar list(keys) para evitar erro de mutação durante iteração
     for ticker in list(state["tickers"].keys()):
         info = state["tickers"][ticker]
         try:
-            new_info = await check_ticker(ticker, info, send_message)
+            # Passamos o state completo para registar o histórico
+            new_info = await check_ticker(ticker, info, send_message, state)
             if new_info != info:
                 state["tickers"][ticker] = new_info
                 changed = True
@@ -143,11 +163,12 @@ def main():
 
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("ping", ping_cmd))
+    application.add_handler(CommandHandler("history", history_cmd))
     application.add_handler(CommandHandler("add", add_cmd))
     application.add_handler(CommandHandler("remove", remove_cmd))
     application.add_handler(CommandHandler("list", list_cmd))
 
-    # Executar verificação periódica
     application.job_queue.run_repeating(
         check_all_tickers, 
         interval=CHECK_INTERVAL_SECONDS, 
