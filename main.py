@@ -38,6 +38,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "❌ /remove TICKER — Remover ticker\n"
         "📋 /list — Ver estado atual\n"
         "📜 /history — Ver últimos sinais\n"
+        "🧪 /test — Testar visualização de sinal\n"
         "🏓 /ping — Verificar se o bot está online\n"
         "❓ /help — Mostrar esta ajuda"
     )
@@ -47,6 +48,35 @@ async def ping_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     await update.message.reply_text(f"🏓 *Pong!*\nBot online e a monitorizar.\n🕒 {now}", parse_mode=constants.ParseMode.MARKDOWN)
 
+async def test_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Simula o envio de um sinal de entrada e um sinal de alvo atingido para teste."""
+    test_ticker = "TEST"
+    test_entry = 100.00
+    test_target = 101.50
+    test_diff = 1.50
+    
+    entry_msg = (
+        f"🧪 *[TESTE]* 🟢 *{test_ticker}* — SINAL DE ENTRADA\n"
+        f"💵 Preço Atual: {test_entry:.2f}\n"
+        f"📥 Entrada (Mín. Ontem): {test_entry:.2f}\n"
+        f"🎯 Alvo (Máx. 2 Dias): {test_target:.2f}\n"
+        f"📊 Potencial: {test_diff:.2f}%\n\n"
+        f"⚠️ Sem Stop Loss definido."
+    )
+    
+    target_msg = (
+        f"🧪 *[TESTE]* 🎯 *{test_ticker}* — ALVO ATINGIDO\n"
+        f"💰 Preço de Venda: {test_target:.2f}\n"
+        f"📥 Entrada foi em: {test_entry:.2f}\n"
+        f"📈 Lucro Estimado: {test_diff:.2f}%\n\n"
+        f"Trade concluído com sucesso! ✅"
+    )
+    
+    await update.message.reply_text("Iniciando teste de visualização de sinais...", parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text(entry_msg, parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text("--- Simulação de Alvo Atingido (abaixo) ---", parse_mode=constants.ParseMode.MARKDOWN)
+    await update.message.reply_text(target_msg, parse_mode=constants.ParseMode.MARKDOWN)
+
 async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = load_state()
     history = state.get("history", [])
@@ -55,7 +85,6 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     message = "📜 *Últimos Sinais Enviados:*\n\n"
-    # Mostrar os últimos 10 sinais (mais recentes primeiro)
     for entry in reversed(history[-10:]):
         message += f"{entry}\n"
 
@@ -143,7 +172,6 @@ async def check_all_tickers(context: ContextTypes.DEFAULT_TYPE):
     for ticker in list(state["tickers"].keys()):
         info = state["tickers"][ticker]
         try:
-            # Passamos o state completo para registar o histórico
             new_info = await check_ticker(ticker, info, send_message, state)
             if new_info != info:
                 state["tickers"][ticker] = new_info
@@ -164,6 +192,7 @@ def main():
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("help", help_cmd))
     application.add_handler(CommandHandler("ping", ping_cmd))
+    application.add_handler(CommandHandler("test", test_cmd))
     application.add_handler(CommandHandler("history", history_cmd))
     application.add_handler(CommandHandler("add", add_cmd))
     application.add_handler(CommandHandler("remove", remove_cmd))
